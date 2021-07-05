@@ -1,0 +1,187 @@
+<template>
+  <div class="page">
+    <div class="navbar">
+      <div class="navbar-bg"></div>
+      <div class="navbar-inner sliding">
+        <div class="left">
+          <a href="/list" class="link">
+            <i class="f7-icons">chevron_left</i> 戻る
+          </a>
+        </div>
+        <div class="title">${ profile.displayName }</div>
+      </div>
+    </div>
+    <div class="page-content">
+      <div class="list">
+        <ul>
+          <li>
+            <div class="item-content">
+              <div class="item-title">
+                <div class="item-header">表示名</div>
+                ${ profile.displayName }
+              </div>
+            </div>
+          </li>
+          <li>
+            <div class="item-content">
+              <div class="item-title">
+                <div class="item-header">フォロワー数</div>
+                ${ profile.followers_count }
+              </div>
+            </div>
+          </li>
+          <li>
+            <div class="item-content">
+              <div class="item-title">
+                <div class="item-header">フォロー数</div>
+                ${ profile.follows_count }
+              </div>
+            </div>
+          </li>
+          <li class="no-me">
+            <a href="#" class="list-button follow" @click=${follow}>フォローする</a>
+            <a href="#" class="list-button color-red unfollow" @click=${unfollow}>フォロー解除</a>
+          </li>
+        </ul>
+      </div>
+      <div class="block-title">フォロワー</div>
+      <div class="list">
+        <ul class="followers">
+        </ul>
+      </div>
+      <div class="block-title">フォロー</div>
+      <div class="list">
+        <ul class="follows">
+        </ul>
+      </div>
+    </div>
+  </div>
+</template>
+<script>
+  export default async function (props, {$f7, $f7router, $on, $onBeforeMount, $onMounted, $onBeforeUnmount, $onUnmounted }) {
+    const { profile } = props;
+    const user = ncmb.User.getCurrentUser();
+    // 画面表示前に実行されるイベント
+    $on('pageBeforeIn', async (e, page) => {
+      const user = ncmb.User.getCurrentUser();
+      // 自分のプロフィールだったらボタンを非表示に
+      if (profile.user.objectId === user.objectId) {
+        $('.no-me').hide();
+      }
+      // フォロー済みかチェック
+      const Follow = ncmb.DataStore('Follow')
+      const isFollow = await Follow
+        .equalTo('follows', profile.objectId)
+        .fetch();
+      if (isFollow.objectId) {
+        // フォローしている
+        page.$el.find('.follow').hide();
+      } else {
+        // フォローしていない
+        page.$el.find('.unfollow').hide();
+      }
+      // フォロー/フォロワー一覧を取得
+      const { followers, follows } = await getFollow(profile.user);
+      // フォロワーを表示
+      showUser.bind(page)(followers, 'followers');
+      // フォローしているユーザを表示
+      showUser.bind(page)(follows, 'follows')
+    });
+
+    // フォロー/フォロワーを一覧表示する関数
+    const showUser = async function(ids, name) {
+      // 表示対象がなければ何もしない
+      if (ids.length === 0) return;
+      // 表示対象のobjectIdでProfileクラスを検索します
+      const Profile = ncmb.DataStore('Profile');
+      const profiles = await Profile
+        .in('objectId', ids)
+        .limit(1000)
+        .fetchAll();
+      // 返ってきたプロフィールデータを指定されたクラスに描画します
+      this.$el.find(`.${name}`).html(profiles.map(profile => `
+        <li>
+          <div class="item-content">
+            <a data-object-id="${profile.objectId}" href="#">${profile.displayName}</a>
+          </div>
+        </li>
+      `).join(''));
+      // リストをタップした際の処理
+      this.$el.find(`.${name} li`).on('click', e => {
+        // タップされたデータのobjectIdを特定します
+        const objectId = $(e.target).data('object-id');
+        // タップされたプロフィールデータを特定します
+        const profile = profiles.filter(p => p.objectId === objectId)[0];
+        // 画面遷移します
+        return $f7router.navigate(`/show/${objectId}`, {props: { profile }});
+      });
+    }
+
+    // 指定したユーザのフォロー/フォロワーを取得する
+    const getFollow = async (user) => {
+      // ポインターの作成
+      const pointer = {
+        __type: 'Pointer',
+        className: 'user',
+        objectId: user.objectId
+      };
+      const Follow = ncmb.DataStore('Follow');
+      return await Follow
+        .equalTo('user', pointer)  // ポインターで検索
+        .fetch();
+    }
+
+    // フォロー処理
+    const follow = async () => {
+      // 自分のフォローデータを取得
+      let follow = await getFollow(user);
+      // フォロー対象を follows フィールドに追加
+      await follow
+        .addUnique('follows', profile.objectId)
+        .update();
+      // データを更新（再度取得）
+      follow = await getFollow(user);
+      // 自分のフォロー数をアップデート
+      const myProfile = await getProfile();
+      await myProfile
+        .set('follows_count', follow.follows.length)
+        .update();
+      // フォロー対象のデータ更新はスクリプトで実行
+      await ncmb.Script
+        .data({
+          follow_id: profile.objectId,
+          follower_id: myProfile.objectId,
+          action: 'add'
+        })
+        .exec('POST', 'follower.js');
+      $f7.dialog.alert(`${profile.displayName}をフォローしました`);
+    }
+
+    // フォロー解除処理
+    const unfollow = async () => {
+      // 自分のフォローデータを取得
+      let follow = await getFollow(user);
+      // フォロー解除対象を follows フィールドに追加
+      await follow
+        .remove('follows', profile.objectId)
+        .update();
+      // データを更新（再度取得）
+      follow = await getFollow(user);
+      // 自分のフォロー数をアップデート
+      const myProfile = await getProfile();
+      await myProfile
+        .set('follows_count', follow.follows.length)
+        .update();
+      // フォロー解除対象のデータ更新はスクリプトで実行
+      const res = await ncmb.Script
+        .data({
+          follow_id: profile.objectId,
+          follower_id: myProfile.objectId,
+          action: 'remove'
+        })
+        .exec('POST', 'follower.js');
+      $f7.dialog.alert(`${profile.displayName}のフォローを外しました`);
+    }
+    return $render;
+  }
+</script>

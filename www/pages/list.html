@@ -1,0 +1,62 @@
+<template>
+  <div class="page">
+    <div class="navbar">
+      <div class="navbar-bg"></div>
+      <div class="navbar-inner sliding">
+        <div class="title">ユーザ一覧</div>
+      </div>
+    </div>
+    <div class="page-content">
+      <div class="data-table profiles">
+        <table>
+          <thead>
+            <td>ユーザ名</td>
+            <td>フォロー</td>
+            <td>フォロワー</td>
+          </thead>
+          <tbody>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</template>
+<script>
+  export default async function (props, {$f7, $f7router, $on, $onBeforeMount, $onMounted, $onBeforeUnmount, $onUnmounted }) {
+    // 画面表示前に実行されるイベント
+    $on('pageBeforeIn', async (e, page) => {
+      // 認証状態のチェック
+      if (!(await checkAuth())) {
+        // false が返ってきたらログイン画面に遷移
+        return $f7router.navigate({name: 'Login'});
+      }
+      const Profile = ncmb.DataStore('Profile');
+      const ary = await Profile.limit(100).fetchAll();
+      // 取得したプロフィールデータをHTMLに描画
+      showProfiles.bind(page)(ary);
+      // 描画した一覧をタップした際のイベント
+      page.$el.find('.profiles tbody tr').on('click', (e) => changeScreen(e, ary));
+    });
+
+    // 一覧をタップした際のイベント
+    const changeScreen = async function(e, ary) {
+      // タップしたデータのオブジェクトIDを取得
+      const objectId = $(e.target).parents('tr').data('object-id');
+      // 対象になるプロフィールデータを取得
+      const profile = ary.filter(m => m.objectId === objectId)[0];
+      $f7router.navigate(`/show/${objectId}`, {props: { profile }});
+    }
+
+    // プロフィールデータを描画する関数
+    const showProfiles = function(ary) {
+      this.$el.find('.profiles tbody').html(ary.map(profile => `
+      <tr data-object-id="${profile.objectId}">
+        <td nowrap>${profile.displayName}</td>
+        <td nowrap>${profile.follows_count}</td>
+        <td nowrap>${profile.followers_count}</td>
+      </tr>
+      `).join(''));
+    }
+    return $render;
+  }
+</script>
